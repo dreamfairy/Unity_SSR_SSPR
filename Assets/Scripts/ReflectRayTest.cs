@@ -7,6 +7,15 @@ public sealed class ReflectRayTest : MonoBehaviour
 {
     private void Update()
     {
+        Camera camera = Camera.current;
+        if(camera && (camera.cameraType == CameraType.Game || camera.cameraType == CameraType.SceneView))
+        {
+            Matrix4x4 vp = GL.GetGPUProjectionMatrix(camera.projectionMatrix, false) * camera.worldToCameraMatrix;
+            Matrix4x4 inv_vp = vp.inverse;
+
+            Shader.SetGlobalMatrix("_Camera_INV_VP", inv_vp);
+        }
+
         if (Input.GetMouseButton(0))
         {
             Ray r = Camera.main.ScreenPointToRay(Input.mousePosition);
