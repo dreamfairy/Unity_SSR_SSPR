@@ -49,5 +49,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5de608ef5a0589543983b706ae6b952a, type: 3}
   m_Name: NewSSRRenderFeature
   m_EditorClassIdentifier: 
-  m_Active: 1
+  m_Active: 0
   SSRMaterial: {fileID: 2100000, guid: 4c5e08c2cfa130140a9a57cff70176f6, type: 2}

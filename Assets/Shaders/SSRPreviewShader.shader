@@ -102,6 +102,7 @@
 
             float4 frag (v2f i) : SV_Target
             {
+				//return float4(i.vsRay);
 				float depth = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, sampler_CameraDepthTexture, i.uv);
 				depth = Linear01Depth(depth, _ZBufferParams);
 			
