@@ -3,6 +3,7 @@
     Properties
     {
         _MainTex ("Texture", 2D) = "white" {}
+		_SkyBoxCubeMap("SkyBox", Cube) = ""{}
     }
     SubShader
     {
@@ -18,8 +19,8 @@
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 			#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
-			#define MAX_TRACE_DIS 50
-			#define MAX_IT_COUNT 50         
+			#define MAX_TRACE_DIS 500
+			#define MAX_IT_COUNT 200         
 			#define EPSION 0.1
 
             struct appdata
@@ -48,6 +49,9 @@
 			TEXTURE2D(_CameraDepthTexture);
 			SAMPLER(sampler_CameraDepthTexture);
 
+			TEXTURECUBE(_SkyBoxCubeMap);
+			SAMPLER(sampler_SkyBoxCubeMap);
+
 			float4x4 _InverseProjectionMatrix;
 			float4x4 _InverseViewMatrix;
 			float4x4 _Camera_INV_VP;
@@ -74,9 +78,16 @@
 				o.positionCS = screenPos;
 				o.positionCS.y = 1 - o.positionCS.y;
 
-				float4 cameraRay = float4(o.positionCS.xy * 2.0 - 1.0, 1, 1.0);
+				float zFar = _ProjectionParams.z;
+				float4 cameraRay = float4(float3(o.positionCS.xy * 2.0 - 1.0, 1) * zFar, zFar);
 				cameraRay = mul(unity_CameraInvProjection, cameraRay);
-				o.vsRay = cameraRay / cameraRay.w;
+				//cameraRay = cameraRay / cameraRay.w;
+
+				float4 cameraRayOrigin = float4(o.positionCS.xy * 2.0 - 1.0, 0, 1.0);
+				cameraRayOrigin = mul(unity_CameraInvProjection, cameraRayOrigin);
+				cameraRayOrigin = cameraRayOrigin / cameraRayOrigin.w;
+
+				o.vsRay = cameraRay;
                 return o;
             }
 
@@ -87,19 +98,21 @@
 				return float2(screenPos.x, screenPos.y) * 0.5 + 0.5;
 			}
 
-			float compareWithDepth(float3 vpos, out bool isInside)
+			int compareWithDepth(float3 vpos, out bool isInside, out float outputDepth)
 			{
 				float2 uv = PosToUV(vpos);
 				float depth = SAMPLE_TEXTURE2D(_CameraDepthTexture, sampler_CameraDepthTexture, uv);
 				depth = LinearEyeDepth(depth, _ZBufferParams);
 				isInside = uv.x > 0 && uv.x < 1 && uv.y > 0 && uv.y < 1;
-				return vpos.z + depth;
+				outputDepth = depth;
+				return -vpos.z >= depth;
 			}
 
 			bool rayTrace(float3 o, float3 r, out float3 hitp)
 			{
 				float3 start = o;
 				float3 end = o;
+				float outputDepth;
 				float stepSize = 0.15;//MAX_TRACE_DIS / MAX_IT_COUNT;
 
 				UNITY_LOOP
@@ -110,10 +123,10 @@
 							return false;
 
 						bool isInside = true;
-						float diff = compareWithDepth(end, isInside);
+						int diff = compareWithDepth(end, isInside, outputDepth);
 						if (isInside)
 						{
-							if (abs(diff) < 0.09)
+							if (abs(outputDepth - (-1 * end.z)) < 0.1)
 							{
 								hitp = end;
 								return true;
@@ -151,11 +164,12 @@
 
 				float depth = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, sampler_CameraDepthTexture, screenPos.xy);
 				depth = Linear01Depth(depth, _ZBufferParams);
+			
 
 				float3 wsNormal = float3(0, 1, 0);    //世界坐标系下的法线
 				float3 vsNormal = (TransformWorldToViewDir(wsNormal));    //将转换到view space
 
-				float3 vsRayOrigin = i.vsRay * depth;
+				float3 vsRayOrigin = (i.vsRay) * depth;
 				float3 reflectionDir = normalize(reflect(vsRayOrigin, vsNormal));
 
 				float3 hitp = 0;
@@ -164,7 +178,13 @@
 				{
 					float2 tuv = PosToUV(hitp);
 					float3 hitCol = SAMPLE_TEXTURE2D(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, tuv).xyz;
+
 					col += hitCol;
+				}
+				else {
+					float3 viewPosToWorld = normalize(i.positionOS.xyz - _WorldSpaceCameraPos.xyz);
+					float3 reflectDir = reflect(viewPosToWorld, wsNormal);
+					col = SAMPLE_TEXTURECUBE(_SkyBoxCubeMap, sampler_SkyBoxCubeMap, reflectDir);
 				}
 
                 return float4(col, 1);
