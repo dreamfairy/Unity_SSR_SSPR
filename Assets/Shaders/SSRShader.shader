@@ -1,19 +1,19 @@
 ﻿Shader "Unlit/SSRShader"
 {
-    Properties
-    {
-        _MainTex ("Texture", 2D) = "white" {}
+	Properties
+	{
+		_Noise ("NoiseTex", 2D) = "white" {}
 		_SkyBoxCubeMap("SkyBox", Cube) = ""{}
-    }
-    SubShader
-    {
-        Tags { "RenderType"="Opaque" "Queue"="Transparent" }
+	}
+	SubShader
+	{
+		Tags { "RenderType"="Opaque" "Queue"="Transparent" }
 		ZWrite Off
-        Pass
-        {
+		Pass
+		{
 			HLSLPROGRAM
-            #pragma vertex vert
-            #pragma fragment frag
+			#pragma vertex vert
+			#pragma fragment frag
 			#pragma enable_d3d11_debug_symbols
 
 			#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
@@ -23,25 +23,24 @@
 			#define MAX_IT_COUNT 200         
 			#define EPSION 0.1
 
-            struct appdata
-            {
-                float4 vertex : POSITION;
-                float2 uv : TEXCOORD0;
-            };
+			struct appdata
+			{
+				float4 vertex : POSITION;
+				float2 uv : TEXCOORD0;
+			};
 
-            struct v2f
-            {
-                float2 uv : TEXCOORD0;
+			struct v2f
+			{
+				float2 uv : TEXCOORD0;
 				float3 positionWS : TEXCOORD1;
 				float4 positionOS : TEXCOORD2;
 				float4 positionCS : TEXCOORD3;
 				float4 vsRay	  : TEXCOORD4;
-                float4 vertex : SV_POSITION;
-            };
+				float4 vertex : SV_POSITION;
+			};
 
-			TEXTURE2D(_MainTex);
-			SAMPLER(sampler_MainTex);
-            float4 _MainTex_ST;
+			TEXTURE2D(_Noise);
+			SAMPLER(sampler_Noise);
 
 			TEXTURE2D(_CameraOpaqueTexture);
 			SAMPLER(sampler_CameraOpaqueTexture);
@@ -62,11 +61,11 @@
 				return normalize(ret);
 			}
 
-            v2f vert (appdata v)
-            {
-                v2f o;
-                o.vertex = TransformObjectToHClip(v.vertex);
-                o.uv = TRANSFORM_TEX(v.uv, _MainTex);
+			v2f vert (appdata v)
+			{
+				v2f o;
+				o.vertex = TransformObjectToHClip(v.vertex);
+				o.uv = v.uv;
 
 				o.positionWS = TransformObjectToWorld(v.vertex).xyz;
 				o.positionOS = v.vertex.xyzw;
@@ -88,62 +87,63 @@
 				cameraRayOrigin = cameraRayOrigin / cameraRayOrigin.w;
 
 				o.vsRay = cameraRay;
-                return o;
-            }
+				return o;
+			}
 
-			float2 PosToUV(float3 vpos)
+			float2 ViewPosToCS(float3 vpos)
 			{
 				float4 proj_pos = mul(unity_CameraProjection, float4(vpos, 1));
 				float3 screenPos = proj_pos.xyz / proj_pos.w;
 				return float2(screenPos.x, screenPos.y) * 0.5 + 0.5;
 			}
 
-			int compareWithDepth(float3 vpos, out bool isInside, out float outputDepth)
+			float compareWithDepth(float3 vpos)
 			{
-				float2 uv = PosToUV(vpos);
+				float2 uv = ViewPosToCS(vpos);
 				float depth = SAMPLE_TEXTURE2D(_CameraDepthTexture, sampler_CameraDepthTexture, uv);
 				depth = LinearEyeDepth(depth, _ZBufferParams);
-				isInside = uv.x > 0 && uv.x < 1 && uv.y > 0 && uv.y < 1;
-				outputDepth = depth;
-				return -vpos.z >= depth;
+				int isInside = uv.x > 0 && uv.x < 1 && uv.y > 0 && uv.y < 1;
+				return lerp(0, vpos.z + depth, isInside);
 			}
 
-			bool rayTrace(float3 o, float3 r, out float3 hitp)
+			bool rayMarching(float3 o, float3 r, out float2 hitUV)
 			{
 				float3 start = o;
 				float3 end = o;
-				float outputDepth;
-				float stepSize = 0.15;//MAX_TRACE_DIS / MAX_IT_COUNT;
+				float stepSize = 0.15;
+				float thinkness = 0.1;
+				float triveled = 0;
 
 				UNITY_LOOP
-					for (int i = 1; i <= MAX_IT_COUNT; ++i)
-					{
-						end = o + r * stepSize * i;
-						if (length(end - start) > MAX_TRACE_DIS)
-							return false;
+				for (int i = 1; i <= MAX_IT_COUNT; ++i)
+				{
+					end += r * stepSize;
+					triveled += stepSize;
 
-						bool isInside = true;
-						int diff = compareWithDepth(end, isInside, outputDepth);
-						if (isInside)
+					if (triveled > MAX_TRACE_DIS)
+					return false;
+
+					float collied = compareWithDepth(end);
+					if (collied > 0)
+					{
+						if (abs(collied) < thinkness)
 						{
-							if (abs(outputDepth - (-1 * end.z)) < 0.1)
-							{
-								hitp = end;
-								return true;
-							}
-						}
-						else
-						{
-							return false;
+							hitUV = ViewPosToCS(end);
+							return true;
 						}
 					}
+					else
+					{
+						return false;
+					}
+				}
 				return false;
 			}
 
-            float4 frag (v2f i) : SV_Target
-            {
+			float4 frag (v2f i) : SV_Target
+			{
 				float4 screenPos = i.positionCS;
-			/*	float4 screenPos = TransformObjectToHClip(i.positionOS);
+				/*	float4 screenPos = TransformObjectToHClip(i.positionOS);
 				screenPos.xyz /= screenPos.w;
 				screenPos.xy = screenPos.xy * 0.5 + 0.5;
 				screenPos.y = 1 - screenPos.y;
@@ -164,32 +164,31 @@
 
 				float depth = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, sampler_CameraDepthTexture, screenPos.xy);
 				depth = Linear01Depth(depth, _ZBufferParams);
-			
+				
+				float2 noiseTex = (SAMPLE_TEXTURE2D(_Noise, sampler_Noise, (i.uv * 5) + _Time.x).xy * 2 - 1) * 0.1;
 
-				float3 wsNormal = float3(0, 1, 0);    //世界坐标系下的法线
+				float3 wsNormal = normalize(float3(noiseTex.x, 1, noiseTex.y));    //世界坐标系下的法线
 				float3 vsNormal = (TransformWorldToViewDir(wsNormal));    //将转换到view space
 
 				float3 vsRayOrigin = (i.vsRay) * depth;
 				float3 reflectionDir = normalize(reflect(vsRayOrigin, vsNormal));
 
-				float3 hitp = 0;
+				float2 hitUV = 0;
 				float3 col = SAMPLE_TEXTURE2D(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, screenPos.xy).xyz;
-				if (rayTrace(vsRayOrigin, reflectionDir, hitp))
+				if (rayMarching(vsRayOrigin, reflectionDir, hitUV))
 				{
-					float2 tuv = PosToUV(hitp);
-					float3 hitCol = SAMPLE_TEXTURE2D(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, tuv).xyz;
-
+					float3 hitCol = SAMPLE_TEXTURE2D(_CameraOpaqueTexture, sampler_CameraOpaqueTexture, hitUV).xyz;
 					col += hitCol;
 				}
 				else {
-					float3 viewPosToWorld = normalize(i.positionOS.xyz - _WorldSpaceCameraPos.xyz);
+					float3 viewPosToWorld = normalize(i.positionWS.xyz - _WorldSpaceCameraPos.xyz);
 					float3 reflectDir = reflect(viewPosToWorld, wsNormal);
 					col = SAMPLE_TEXTURECUBE(_SkyBoxCubeMap, sampler_SkyBoxCubeMap, reflectDir);
 				}
 
-                return float4(col, 1);
-            }
-            ENDHLSL
-        }
-    }
+				return float4(col, 1);
+			}
+			ENDHLSL
+		}
+	}
 }
