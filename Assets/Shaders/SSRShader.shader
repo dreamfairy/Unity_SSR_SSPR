@@ -75,18 +75,16 @@
 				screenPos.xy = screenPos.xy * 0.5 + 0.5;
 
 				o.positionCS = screenPos;
+
+#if UNITY_UV_STARTS_AT_TOP
 				o.positionCS.y = 1 - o.positionCS.y;
+#endif
 
 				float zFar = _ProjectionParams.z;
-				float4 cameraRay = float4(float3(o.positionCS.xy * 2.0 - 1.0, 1) * zFar, zFar);
-				cameraRay = mul(unity_CameraInvProjection, cameraRay);
-				//cameraRay = cameraRay / cameraRay.w;
+				float4 vsRay = float4(float3(o.positionCS.xy * 2.0 - 1.0, 1) * zFar, zFar);
+				vsRay = mul(unity_CameraInvProjection, vsRay);
 
-				float4 cameraRayOrigin = float4(o.positionCS.xy * 2.0 - 1.0, 0, 1.0);
-				cameraRayOrigin = mul(unity_CameraInvProjection, cameraRayOrigin);
-				cameraRayOrigin = cameraRayOrigin / cameraRayOrigin.w;
-
-				o.vsRay = cameraRay;
+				o.vsRay = vsRay;
 				return o;
 			}
 
@@ -108,33 +106,36 @@
 
 			bool rayMarching(float3 o, float3 r, out float2 hitUV)
 			{
-				float3 start = o;
 				float3 end = o;
-				float stepSize = 0.15;
+				float stepSize = 0.5;
 				float thinkness = 0.1;
 				float triveled = 0;
+				int max_marching = 256;
+				float max_distance = 500;
 
 				UNITY_LOOP
-				for (int i = 1; i <= MAX_IT_COUNT; ++i)
+				for (int i = 1; i <= max_marching; ++i)
 				{
 					end += r * stepSize;
 					triveled += stepSize;
 
-					if (triveled > MAX_TRACE_DIS)
+					if (triveled > max_distance)
 					return false;
 
 					float collied = compareWithDepth(end);
-					if (collied > 0)
+					if (collied < 0)
 					{
 						if (abs(collied) < thinkness)
 						{
 							hitUV = ViewPosToCS(end);
 							return true;
 						}
-					}
-					else
-					{
-						return false;
+
+						//回到当前起点
+						end -= r * stepSize;
+						triveled -= stepSize;
+						//步进减半
+						stepSize *= 0.5;
 					}
 				}
 				return false;
